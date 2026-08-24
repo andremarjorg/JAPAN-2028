@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="no">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Japan – prioritetskart</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+<style>
+  :root {
+    --paper: #faf9f5;
+    --ink: #1f2a3c;
+    --ink-soft: #5b6472;
+    --indigo: #2b4570;
+    --indigo-soft: #eef1f6;
+    --line: #dedad0;
+    --high: #b0392c;
+    --mid: #c98a1a;
+    --low: #3f7a5c;
+    --radius: 10px;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: var(--paper);
+    color: var(--ink);
+  }
+  #app {
+    display: flex;
+    height: 100vh;
+  }
+
+  /* Sidebar */
+  #sidebar {
+    width: 320px;
+    flex-shrink: 0;
+    background: var(--paper);
+    border-right: 1px solid var(--line);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  #sidebar-header {
+    padding: 20px 18px 14px;
+    border-bottom: 1px solid var(--line);
+  }
+  #sidebar-header h1 {
+    font-size: 17px;
+    font-weight: 600;
+    margin: 0 0 4px;
+    letter-spacing: 0.01em;
+  }
+  #sidebar-header p {
+    font-size: 12px;
+    color: var(--ink-soft);
+    margin: 0;
+  }
+  #controls {
+    padding: 12px 18px;
+    border-bottom: 1px solid var(--line);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  #search {
+    width: 100%;
+    padding: 8px 10px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    font-size: 13px;
+    background: white;
+  }
+  #search:focus { outline: 2px solid var(--indigo); outline-offset: -1px; }
+  #region-filter {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+  .chip {
+    font-size: 11px;
+    padding: 4px 10px;
+    border-radius: 999px;
+    border: 1px solid var(--line);
+    background: white;
+    color: var(--ink-soft);
+    cursor: pointer;
+  }
+  .chip.active {
+    background: var(--indigo);
+    border-color: var(--indigo);
+    color: white;
+  }
+  #list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px 12px 20px;
+  }
+  .place-card {
+    display: flex;
+    gap: 10px;
+    padding: 10px 10px;
+    border-radius: var(--radius);
+    border: 1px solid transparent;
+    cursor: pointer;
+    margin-bottom: 4px;
+  }
+  .place-card:hover { background: var(--indigo-soft); }
+  .place-card.selected { border-color: var(--indigo); background: var(--indigo-soft); }
+  .dot {
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    margin-top: 4px;
+    flex-shrink: 0;
+  }
+  .place-info { flex: 1; min-width: 0; }
+  .place-info .name {
+    font-size: 13px;
+    font-weight: 600;
+    margin: 0 0 2px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .place-info .meta {
+    font-size: 11px;
+    color: var(--ink-soft);
+    margin: 0;
+  }
+  .priority-select {
+    font-size: 12px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 2px 4px;
+    background: white;
+    align-self: center;
+  }
+
+  /* Map */
+  #map { flex: 1; }
+  .leaflet-popup-content { font-size: 13px; }
+  .marker-pin {
+    width: 16px; height: 16px;
+    border-radius: 50% 50% 50% 0;
+    transform: rotate(-45deg);
+    border: 2px solid white;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.35);
+  }
+  #status {
+    position: absolute;
+    bottom: 12px; left: 12px;
+    background: white;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 6px 12px;
+    font-size: 11px;
+    color: var(--ink-soft);
+    z-index: 1000;
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="sidebar">
+    <div id="sidebar-header">
+      <h1>Japan – prioritetskart</h1>
+      <p id="count-label">Laster steder...</p>
+    </div>
+    <div id="controls">
+      <input id="search" type="text" placeholder="Søk etter sted..." />
+      <div id="region-filter"></div>
+    </div>
+    <div id="list"></div>
+  </div>
+  <div style="flex:1; position:relative;">
+    <div id="map"></div>
+    <div id="status">Kobler til Google Sheet...</div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+// ---------------------------------------------------------------
+// KONFIGURASJON
+// Lim inn URL-en du får når du deployer Apps Script-et som web-app.
+// Se README.md for fremgangsmåte.
+// ---------------------------------------------------------------
+const API_URL = "https://script.google.com/macros/s/AKfycbw7Qc1wJa32eRBXIxDu0qw2HaAxB4lgwzIYWWyOMm5Kd46JxWg8fx0SlvxUHWcaT04RDA/exec";
+
+const PRIORITY_COLORS = { 1: '#b0392c', 2: '#b0392c', 3: '#c98a1a', 4: '#3f7a5c', 5: '#3f7a5c' };
+function colorFor(p) { return PRIORITY_COLORS[p] || '#7a7a72'; }
+
+let allPlaces = [];
+let markers = {};
+let activeRegion = 'Alle';
+let map, statusEl, countEl, listEl, searchEl, regionFilterEl;
+
+function init() {
+  statusEl = document.getElementById('status');
+  countEl = document.getElementById('count-label');
+  listEl = document.getElementById('list');
+  searchEl = document.getElementById('search');
+  regionFilterEl = document.getElementById('region-filter');
+
+  map = L.map('map').setView([36.2048, 138.2529], 6); // sentrert på Japan
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 18,
+    attribution: '&copy; OpenStreetMap-bidragsytere'
+  }).addTo(map);
+
+  searchEl.addEventListener('input', renderList);
+
+  loadData();
+}
+
+function loadData() {
+  if (API_URL.indexOf('PASTE_DIN') === 0) {
+    statusEl.textContent = 'Ikke koblet til noe ark ennå – sett inn API_URL i koden.';
+    return;
+  }
+  statusEl.textContent = 'Henter data...';
+
+  // JSONP i stedet for fetch: Apps Script sender ikke CORS-headere,
+  // så en vanlig fetch() blir blokkert av nettleseren. Et <script>-tag
+  // er ikke underlagt den samme begrensningen.
+  window.__onPlacesLoaded = function (data) {
+    handleLoadedData(data);
+    document.getElementById('jsonp-script').remove();
+  };
+  const script = document.createElement('script');
+  script.id = 'jsonp-script';
+  script.src = API_URL + '?callback=__onPlacesLoaded';
+  script.onerror = function () {
+    statusEl.textContent = 'Kunne ikke hente data (sjekk at API_URL er riktig og at scriptet er distribuert på nytt).';
+  };
+  document.body.appendChild(script);
+}
+
+function handleLoadedData(data) {
+  try {
+    allPlaces = data.map(function (row) {
+      return {
+        row: row._row,
+        name: row.Navn,
+        lat: parseFloat(row.Lat),
+        lng: parseFloat(row.Lng),
+        region: row.Region || 'Ukjent',
+        category: row.Kategori || '',
+        priority: parseInt(row.Prioritet, 10) || 3,
+        note: row.Notat || ''
+      };
+    }).filter(function (p) { return !isNaN(p.lat) && !isNaN(p.lng); });
+
+    buildRegionFilter();
+    renderMarkers();
+    renderList();
+    statusEl.textContent = allPlaces.length + ' steder lastet fra arket';
+  } catch (err) {
+    statusEl.textContent = 'Kunne ikke hente data: ' + err.message;
+  }
+}
+
+function buildRegionFilter() {
+  const regions = ['Alle'].concat(Array.from(new Set(allPlaces.map(function (p) { return p.region; }))));
+  regionFilterEl.innerHTML = '';
+  regions.forEach(function (r) {
+    const chip = document.createElement('span');
+    chip.className = 'chip' + (r === activeRegion ? ' active' : '');
+    chip.textContent = r;
+    chip.onclick = function () {
+      activeRegion = r;
+      buildRegionFilter();
+      renderList();
+    };
+    regionFilterEl.appendChild(chip);
+  });
+}
+
+function renderMarkers() {
+  Object.values(markers).forEach(function (m) { map.removeLayer(m); });
+  markers = {};
+  allPlaces.forEach(function (p) {
+    const icon = L.divIcon({
+      className: '',
+      html: '<div class="marker-pin" style="background:' + colorFor(p.priority) + '"></div>',
+      iconSize: [16, 16],
+      iconAnchor: [8, 16]
+    });
+    const marker = L.marker([p.lat, p.lng], { icon: icon }).addTo(map);
+    marker.bindPopup('<strong>' + p.name + '</strong><br>' + p.category + ' · Prioritet ' + p.priority);
+    marker.on('click', function () { selectPlace(p.row); });
+    markers[p.row] = marker;
+  });
+}
+
+function renderList() {
+  const query = searchEl.value.toLowerCase();
+  listEl.innerHTML = '';
+  const filtered = allPlaces.filter(function (p) {
+    const matchesRegion = activeRegion === 'Alle' || p.region === activeRegion;
+    const matchesQuery = p.name.toLowerCase().includes(query);
+    return matchesRegion && matchesQuery;
+  }).sort(function (a, b) { return a.priority - b.priority; });
+
+  countEl.textContent = filtered.length + ' av ' + allPlaces.length + ' steder';
+
+  filtered.forEach(function (p) {
+    const card = document.createElement('div');
+    card.className = 'place-card';
+    card.innerHTML =
+      '<span class="dot" style="background:' + colorFor(p.priority) + '"></span>' +
+      '<div class="place-info">' +
+        '<p class="name">' + p.name + '</p>' +
+        '<p class="meta">' + p.region + (p.category ? ' · ' + p.category : '') + '</p>' +
+      '</div>';
+
+    const select = document.createElement('select');
+    select.className = 'priority-select';
+    [1, 2, 3, 4, 5].forEach(function (n) {
+      const opt = document.createElement('option');
+      opt.value = n;
+      opt.textContent = 'P' + n;
+      if (n === p.priority) opt.selected = true;
+      select.appendChild(opt);
+    });
+    select.addEventListener('click', function (e) { e.stopPropagation(); });
+    select.addEventListener('change', function (e) {
+      updatePriority(p, parseInt(e.target.value, 10));
+    });
+    card.appendChild(select);
+
+    card.onclick = function () { selectPlace(p.row); };
+    listEl.appendChild(card);
+  });
+}
+
+function selectPlace(row) {
+  const p = allPlaces.find(function (x) { return x.row === row; });
+  if (!p) return;
+  map.setView([p.lat, p.lng], 12, { animate: true });
+  markers[row].openPopup();
+  document.querySelectorAll('.place-card').forEach(function (c) { c.classList.remove('selected'); });
+}
+
+async function updatePriority(place, newPriority) {
+  place.priority = newPriority;
+  renderMarkers();
+  renderList();
+  statusEl.textContent = 'Lagrer endring...';
+  try {
+    // mode: 'no-cors' fordi Apps Script ikke sender CORS-headere tilbake.
+    // Vi kan da ikke lese responsen, men forespørselen sendes og
+    // gjennomføres på serversiden likevel.
+    await fetch(API_URL, {
+      method: 'POST',
+      mode: 'no-cors',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ row: place.row, prioritet: newPriority })
+    });
+    statusEl.textContent = 'Lagret i Google Sheet (sjekk arket for å bekrefte)';
+  } catch (err) {
+    statusEl.textContent = 'Kunne ikke lagre: ' + err.message;
+  }
+}
+
+init();
+</script>
+</body>
+</html>
