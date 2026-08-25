@@ -126,24 +126,36 @@
     color: var(--ink-soft);
     margin: 0;
   }
-  .priority-select {
+  .priority-control {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 90px;
+  }
+  .priority-value {
     font-size: 12px;
-    border: 1px solid var(--line);
-    border-radius: 6px;
-    padding: 2px 4px;
-    background: white;
-    align-self: center;
+    font-weight: 700;
+    width: 24px;
+    text-align: right;
+    flex-shrink: 0;
+  }
+  .priority-slider {
+    width: 60px;
+    accent-color: #D97757;
+    cursor: pointer;
   }
 
   /* Map */
-  #map { flex: 1; }
+  #map {
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+  }
   .leaflet-popup-content { font-size: 13px; }
   .marker-pin {
-    width: 16px; height: 16px;
-    border-radius: 50% 50% 50% 0;
-    transform: rotate(-45deg);
-    border: 2px solid white;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.35);
+    width: 13px; height: 13px;
+    border-radius: 50%;
+    border: 2.5px solid white;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.25);
   }
   #status {
     position: absolute;
@@ -155,6 +167,26 @@
     font-size: 11px;
     color: var(--ink-soft);
     z-index: 1000;
+  }
+  #legend {
+    position: absolute;
+    top: 12px; right: 12px;
+    background: white;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 6px 10px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    color: var(--ink-soft);
+    z-index: 1000;
+  }
+  #legend-bar {
+    width: 90px;
+    height: 8px;
+    border-radius: 4px;
+    background: linear-gradient(to right, hsl(16, 32%, 90%), hsl(16, 82%, 42%));
   }
 </style>
 </head>
@@ -174,20 +206,36 @@
   <div style="flex:1; position:relative;">
     <div id="map"></div>
     <div id="status">Kobler til Google Sheet...</div>
+    <div id="legend">
+      <span>1</span>
+      <div id="legend-bar"></div>
+      <span>100</span>
+    </div>
   </div>
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
 <script>
 // ---------------------------------------------------------------
 // KONFIGURASJON
-// Lim inn URL-en du får når du deployer Apps Script-et som web-app.
-// Se README.md for fremgangsmåte.
+// SHEET_ID: fra arkets URL, biten mellom /d/ og /edit
+// SHEET_TAB: navnet på fanen med stedene, default "Steder"
+// API_URL: Apps Script-URL-en, brukes bare for å SKRIVE endringer
 // ---------------------------------------------------------------
+const SHEET_ID = "PASTE_DIN_SHEET_ID_HER";
+const SHEET_TAB = "Steder";
 const API_URL = "https://script.google.com/macros/s/AKfycbxRUN0-mvxTalUXY29u_JHETk2_W2TDhWGBibE6egFlD1Hlt8IFXRSmtZmsClgTBP1zHw/exec";
 
-const PRIORITY_COLORS = { 1: '#b0392c', 2: '#b0392c', 3: '#c98a1a', 4: '#3f7a5c', 5: '#3f7a5c' };
-function colorFor(p) { return PRIORITY_COLORS[p] || '#7a7a72'; }
+const PRIORITY_MIN = 1;
+const PRIORITY_MAX = 100;
+// Claude-oransje, gradert: blek/lys ved lav prioritet -> knallende mettet oransje ved høy
+function colorFor(p) {
+  const t = Math.min(Math.max((p - PRIORITY_MIN) / (PRIORITY_MAX - PRIORITY_MIN), 0), 1);
+  const saturation = 32 + t * 50;  // 32% (blass) -> 82% (mettet)
+  const lightness = 90 - t * 48;   // 90% (lys)   -> 42% (mørk, men ikke brun/svart)
+  return 'hsl(16, ' + saturation + '%, ' + lightness + '%)';
+}
 
 let allPlaces = [];
 let markers = {};
@@ -202,9 +250,9 @@ function init() {
   regionFilterEl = document.getElementById('region-filter');
 
   map = L.map('map').setView([36.2048, 138.2529], 6); // sentrert på Japan
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', {
     maxZoom: 18,
-    attribution: '&copy; OpenStreetMap-bidragsytere'
+    attribution: 'Kart: &copy; Esri'
   }).addTo(map);
 
   searchEl.addEventListener('input', renderList);
@@ -282,8 +330,8 @@ function renderMarkers() {
     const icon = L.divIcon({
       className: '',
       html: '<div class="marker-pin" style="background:' + colorFor(p.priority) + '"></div>',
-      iconSize: [16, 16],
-      iconAnchor: [8, 16]
+      iconSize: [13, 13],
+      iconAnchor: [7, 7]
     });
     const marker = L.marker([p.lat, p.lng], { icon: icon }).addTo(map);
     marker.bindPopup('<strong>' + p.name + '</strong><br>' + p.category + ' · Prioritet ' + p.priority);
@@ -299,7 +347,7 @@ function renderList() {
     const matchesRegion = activeRegion === 'Alle' || p.region === activeRegion;
     const matchesQuery = p.name.toLowerCase().includes(query);
     return matchesRegion && matchesQuery;
-  }).sort(function (a, b) { return a.priority - b.priority; });
+  }).sort(function (a, b) { return b.priority - a.priority; });
 
   countEl.textContent = filtered.length + ' av ' + allPlaces.length + ' steder';
 
@@ -313,20 +361,28 @@ function renderList() {
         '<p class="meta">' + p.region + (p.category ? ' · ' + p.category : '') + '</p>' +
       '</div>';
 
-    const select = document.createElement('select');
-    select.className = 'priority-select';
-    [1, 2, 3, 4, 5].forEach(function (n) {
-      const opt = document.createElement('option');
-      opt.value = n;
-      opt.textContent = 'P' + n;
-      if (n === p.priority) opt.selected = true;
-      select.appendChild(opt);
+    const priorityControl = document.createElement('div');
+    priorityControl.className = 'priority-control';
+    priorityControl.innerHTML =
+      '<span class="priority-value" style="color:' + colorFor(p.priority) + '">' + p.priority + '</span>';
+    const slider = document.createElement('input');
+    slider.type = 'range';
+    slider.min = PRIORITY_MIN;
+    slider.max = PRIORITY_MAX;
+    slider.value = p.priority;
+    slider.className = 'priority-slider';
+    slider.style.accentColor = colorFor(p.priority);
+    slider.addEventListener('click', function (e) { e.stopPropagation(); });
+    slider.addEventListener('input', function (e) {
+      priorityControl.querySelector('.priority-value').textContent = e.target.value;
+      priorityControl.querySelector('.priority-value').style.color = colorFor(parseInt(e.target.value, 10));
+      slider.style.accentColor = colorFor(parseInt(e.target.value, 10));
     });
-    select.addEventListener('click', function (e) { e.stopPropagation(); });
-    select.addEventListener('change', function (e) {
+    slider.addEventListener('change', function (e) {
       updatePriority(p, parseInt(e.target.value, 10));
     });
-    card.appendChild(select);
+    priorityControl.appendChild(slider);
+    card.appendChild(priorityControl);
 
     card.onclick = function () { selectPlace(p.row); };
     listEl.appendChild(card);
