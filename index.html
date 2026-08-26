@@ -71,7 +71,15 @@
     background: white;
   }
   #search:focus { outline: 2px solid var(--indigo); outline-offset: -1px; }
-  #region-filter {
+  .filter-label {
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--ink-soft);
+    margin: 6px 0 2px;
+  }
+  #region-filter, #category-filter {
     display: flex;
     gap: 6px;
     flex-wrap: wrap;
@@ -89,6 +97,12 @@
     background: var(--indigo);
     border-color: var(--indigo);
     color: white;
+  }
+  .chip-dot {
+    display: inline-block;
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    margin-right: 5px;
   }
   #list {
     flex: 1;
@@ -125,6 +139,15 @@
     font-size: 11px;
     color: var(--ink-soft);
     margin: 0;
+  }
+  .note-text {
+    font-size: 11px;
+    color: var(--ink);
+    background: var(--indigo-soft);
+    border-radius: 6px;
+    padding: 6px 8px;
+    margin: 6px 0 0;
+    line-height: 1.4;
   }
   .priority-control {
     display: flex;
@@ -168,9 +191,28 @@
     color: var(--ink-soft);
     z-index: 1000;
   }
-  #legend {
+  #opacity-control {
     position: absolute;
     top: 12px; right: 12px;
+    background: white;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 6px 10px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    color: var(--ink-soft);
+    z-index: 1000;
+  }
+  #opacity-control input {
+    width: 70px;
+    accent-color: var(--indigo);
+    cursor: pointer;
+  }
+  #legend {
+    position: absolute;
+    top: 54px; right: 12px;
     background: white;
     border: 1px solid var(--line);
     border-radius: var(--radius);
@@ -199,13 +241,20 @@
     </div>
     <div id="controls">
       <input id="search" type="text" placeholder="Søk etter sted..." />
+      <p class="filter-label">Region</p>
       <div id="region-filter"></div>
+      <p class="filter-label">Kategori</p>
+      <div id="category-filter"></div>
     </div>
     <div id="list"></div>
   </div>
   <div style="flex:1; position:relative;">
     <div id="map"></div>
     <div id="status">Kobler til Google Sheet...</div>
+    <div id="opacity-control">
+      <span>Kart</span>
+      <input id="opacity-slider" type="range" min="25" max="100" step="25" value="100" />
+    </div>
     <div id="legend">
       <span>1</span>
       <div id="legend-bar"></div>
@@ -240,7 +289,8 @@ function colorFor(p) {
 let allPlaces = [];
 let markers = {};
 let activeRegion = 'Alle';
-let map, statusEl, countEl, listEl, searchEl, regionFilterEl;
+let activeCategory = 'Alle';
+let map, tileLayer, statusEl, countEl, listEl, searchEl, regionFilterEl, categoryFilterEl;
 
 function init() {
   statusEl = document.getElementById('status');
@@ -248,14 +298,20 @@ function init() {
   listEl = document.getElementById('list');
   searchEl = document.getElementById('search');
   regionFilterEl = document.getElementById('region-filter');
+  categoryFilterEl = document.getElementById('category-filter');
 
   map = L.map('map').setView([36.2048, 138.2529], 6); // sentrert på Japan
-  L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', {
+  tileLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', {
     maxZoom: 18,
     attribution: 'Kart: &copy; Esri'
   }).addTo(map);
 
-  searchEl.addEventListener('input', renderList);
+  searchEl.addEventListener('input', function () { renderList(); renderMarkers(); });
+
+  const opacitySlider = document.getElementById('opacity-slider');
+  opacitySlider.addEventListener('input', function (e) {
+    tileLayer.setOpacity(parseInt(e.target.value, 10) / 100);
+  });
 
   loadData();
 }
@@ -299,6 +355,7 @@ function handleLoadedData(data) {
     }).filter(function (p) { return !isNaN(p.lat) && !isNaN(p.lng); });
 
     buildRegionFilter();
+    buildCategoryFilter();
     renderMarkers();
     renderList();
     statusEl.textContent = allPlaces.length + ' steder lastet fra arket';
@@ -318,15 +375,58 @@ function buildRegionFilter() {
       activeRegion = r;
       buildRegionFilter();
       renderList();
+      renderMarkers();
     };
     regionFilterEl.appendChild(chip);
+  });
+}
+
+// Faste, distinkte farger til kategorier (ikke oransje, siden det er reservert til prioritet)
+const CATEGORY_PALETTE = ['#2B4570', '#3F7A5C', '#7A4E9C', '#1F8A8A', '#B0392C', '#5B6472', '#B08D1C', '#4C6B8A', '#8A4B6B', '#6B7F3B'];
+let categoryColorMap = {};
+
+function categoryColorFor(category) {
+  return categoryColorMap[category] || '#9a9488';
+}
+
+function buildCategoryFilter() {
+  const uniqueCategories = Array.from(new Set(allPlaces.map(function (p) { return p.category; }).filter(Boolean))).sort();
+  categoryColorMap = {};
+  uniqueCategories.forEach(function (c, i) {
+    categoryColorMap[c] = CATEGORY_PALETTE[i % CATEGORY_PALETTE.length];
+  });
+
+  const categories = ['Alle'].concat(uniqueCategories);
+  categoryFilterEl.innerHTML = '';
+  categories.forEach(function (c) {
+    const chip = document.createElement('span');
+    chip.className = 'chip' + (c === activeCategory ? ' active' : '');
+    const swatch = c !== 'Alle' ? '<span class="chip-dot" style="background:' + categoryColorFor(c) + '"></span>' : '';
+    chip.innerHTML = swatch + c;
+    chip.onclick = function () {
+      activeCategory = c;
+      buildCategoryFilter();
+      renderList();
+      renderMarkers();
+    };
+    categoryFilterEl.appendChild(chip);
+  });
+}
+
+function getFilteredPlaces() {
+  const query = searchEl.value.toLowerCase();
+  return allPlaces.filter(function (p) {
+    const matchesRegion = activeRegion === 'Alle' || p.region === activeRegion;
+    const matchesCategory = activeCategory === 'Alle' || p.category === activeCategory;
+    const matchesQuery = p.name.toLowerCase().includes(query);
+    return matchesRegion && matchesCategory && matchesQuery;
   });
 }
 
 function renderMarkers() {
   Object.values(markers).forEach(function (m) { map.removeLayer(m); });
   markers = {};
-  allPlaces.forEach(function (p) {
+  getFilteredPlaces().forEach(function (p) {
     const icon = L.divIcon({
       className: '',
       html: '<div class="marker-pin" style="background:' + colorFor(p.priority) + '"></div>',
@@ -334,20 +434,16 @@ function renderMarkers() {
       iconAnchor: [7, 7]
     });
     const marker = L.marker([p.lat, p.lng], { icon: icon }).addTo(map);
-    marker.bindPopup('<strong>' + p.name + '</strong><br>' + p.category + ' · Prioritet ' + p.priority);
+    const noteHtml = p.note ? '<br><em>' + p.note + '</em>' : '';
+    marker.bindPopup('<strong>' + p.name + '</strong><br>' + p.category + ' · Prioritet ' + p.priority + noteHtml);
     marker.on('click', function () { selectPlace(p.row); });
     markers[p.row] = marker;
   });
 }
 
 function renderList() {
-  const query = searchEl.value.toLowerCase();
   listEl.innerHTML = '';
-  const filtered = allPlaces.filter(function (p) {
-    const matchesRegion = activeRegion === 'Alle' || p.region === activeRegion;
-    const matchesQuery = p.name.toLowerCase().includes(query);
-    return matchesRegion && matchesQuery;
-  }).sort(function (a, b) { return b.priority - a.priority; });
+  const filtered = getFilteredPlaces().sort(function (a, b) { return b.priority - a.priority; });
 
   countEl.textContent = filtered.length + ' av ' + allPlaces.length + ' steder';
 
@@ -355,10 +451,11 @@ function renderList() {
     const card = document.createElement('div');
     card.className = 'place-card';
     card.innerHTML =
-      '<span class="dot" style="background:' + colorFor(p.priority) + '"></span>' +
+      '<span class="dot" style="background:' + categoryColorFor(p.category) + '"></span>' +
       '<div class="place-info">' +
         '<p class="name">' + p.name + '</p>' +
         '<p class="meta">' + p.region + (p.category ? ' · ' + p.category : '') + '</p>' +
+        (p.note ? '<p class="note-text" style="display:none;">' + p.note + '</p>' : '') +
       '</div>';
 
     const priorityControl = document.createElement('div');
@@ -384,7 +481,14 @@ function renderList() {
     priorityControl.appendChild(slider);
     card.appendChild(priorityControl);
 
-    card.onclick = function () { selectPlace(p.row); };
+    card.onclick = function () {
+      selectPlace(p.row);
+      const noteEl = card.querySelector('.note-text');
+      if (noteEl) {
+        noteEl.style.display = noteEl.style.display === 'none' ? 'block' : 'none';
+      }
+      card.classList.add('selected');
+    };
     listEl.appendChild(card);
   });
 }
