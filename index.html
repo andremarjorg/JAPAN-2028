@@ -255,11 +255,6 @@
       <span>Kart</span>
       <input id="opacity-slider" type="range" min="25" max="100" step="25" value="100" />
     </div>
-    <div id="legend">
-      <span>1</span>
-      <div id="legend-bar"></div>
-      <span>100</span>
-    </div>
   </div>
 </div>
 
@@ -429,7 +424,7 @@ function renderMarkers() {
   getFilteredPlaces().forEach(function (p) {
     const icon = L.divIcon({
       className: '',
-      html: '<div class="marker-pin" style="background:' + colorFor(p.priority) + '"></div>',
+      html: '<div class="marker-pin" style="background:' + categoryColorFor(p.category) + '"></div>',
       iconSize: [13, 13],
       iconAnchor: [7, 7]
     });
@@ -461,19 +456,17 @@ function renderList() {
     const priorityControl = document.createElement('div');
     priorityControl.className = 'priority-control';
     priorityControl.innerHTML =
-      '<span class="priority-value" style="color:' + colorFor(p.priority) + '">' + p.priority + '</span>';
+      '<span class="priority-value" style="color:' + categoryColorFor(p.category) + '">' + p.priority + '</span>';
     const slider = document.createElement('input');
     slider.type = 'range';
     slider.min = PRIORITY_MIN;
     slider.max = PRIORITY_MAX;
     slider.value = p.priority;
     slider.className = 'priority-slider';
-    slider.style.accentColor = colorFor(p.priority);
+    slider.style.accentColor = categoryColorFor(p.category);
     slider.addEventListener('click', function (e) { e.stopPropagation(); });
     slider.addEventListener('input', function (e) {
       priorityControl.querySelector('.priority-value').textContent = e.target.value;
-      priorityControl.querySelector('.priority-value').style.color = colorFor(parseInt(e.target.value, 10));
-      slider.style.accentColor = colorFor(parseInt(e.target.value, 10));
     });
     slider.addEventListener('change', function (e) {
       updatePriority(p, parseInt(e.target.value, 10));
