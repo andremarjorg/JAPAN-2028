@@ -210,6 +210,12 @@
     accent-color: var(--indigo);
     cursor: pointer;
   }
+  #mode-toggle {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 4px;
+  }
+  #mode-toggle .chip { flex: 1; text-align: center; }
   #legend {
     position: absolute;
     top: 54px; right: 12px;
@@ -228,7 +234,7 @@
     width: 90px;
     height: 8px;
     border-radius: 4px;
-    background: linear-gradient(to right, hsl(16, 32%, 90%), hsl(16, 82%, 42%));
+    background: linear-gradient(to right, hsl(346, 35%, 92%), hsl(346, 90%, 40%));
   }
 </style>
 </head>
@@ -240,6 +246,11 @@
       <p id="count-label">Laster steder...</p>
     </div>
     <div id="controls">
+      <p class="filter-label">Fargevisning</p>
+      <div id="mode-toggle">
+        <span class="chip active" data-mode="category">Kategori</span>
+        <span class="chip" data-mode="priority">Prioritet</span>
+      </div>
       <input id="search" type="text" placeholder="Søk etter sted..." />
       <p class="filter-label">Region</p>
       <div id="region-filter"></div>
@@ -254,6 +265,11 @@
     <div id="opacity-control">
       <span>Kart</span>
       <input id="opacity-slider" type="range" min="25" max="100" step="25" value="100" />
+    </div>
+    <div id="legend" style="display:none;">
+      <span>1</span>
+      <div id="legend-bar"></div>
+      <span>100</span>
     </div>
   </div>
 </div>
@@ -306,6 +322,17 @@ function init() {
   const opacitySlider = document.getElementById('opacity-slider');
   opacitySlider.addEventListener('input', function (e) {
     tileLayer.setOpacity(parseInt(e.target.value, 10) / 100);
+  });
+
+  document.querySelectorAll('#mode-toggle .chip').forEach(function (chip) {
+    chip.addEventListener('click', function () {
+      colorMode = chip.dataset.mode;
+      document.querySelectorAll('#mode-toggle .chip').forEach(function (c) { c.classList.remove('active'); });
+      chip.classList.add('active');
+      document.getElementById('legend').style.display = colorMode === 'priority' ? 'flex' : 'none';
+      renderMarkers();
+      renderList();
+    });
   });
 
   loadData();
@@ -411,6 +438,21 @@ function colorForPlace(category, priority) {
   return 'hsl(' + hue + ', ' + saturation + '%, ' + lightness + '%)';
 }
 
+// "Japan-rød" (samme rød som i det japanske flagget), gradert etter prioritet
+const JAPAN_RED = '#BC002D';
+const JAPAN_RED_HUE = hexToHue(JAPAN_RED);
+function priorityColorFor(priority) {
+  const t = Math.min(Math.max((priority - PRIORITY_MIN) / (PRIORITY_MAX - PRIORITY_MIN), 0), 1);
+  const saturation = 35 + t * 55;  // 35% (blek/rosa) -> 90% (knallrød)
+  const lightness = 92 - t * 52;   // 92% (lys)       -> 40% (sterk)
+  return 'hsl(' + JAPAN_RED_HUE + ', ' + saturation + '%, ' + lightness + '%)';
+}
+
+let colorMode = 'category';
+function getColor(category, priority) {
+  return colorMode === 'category' ? colorForPlace(category, priority) : priorityColorFor(priority);
+}
+
 function buildCategoryFilter() {
   const uniqueCategories = Array.from(new Set(allPlaces.map(function (p) { return p.category; }).filter(Boolean))).sort();
   categoryColorMap = {};
@@ -454,7 +496,7 @@ function renderMarkers() {
   getFilteredPlaces().forEach(function (p) {
     const icon = L.divIcon({
       className: '',
-      html: '<div class="marker-pin" style="background:' + colorForPlace(p.category, p.priority) + '"></div>',
+      html: '<div class="marker-pin" style="background:' + getColor(p.category, p.priority) + '"></div>',
       iconSize: [13, 13],
       iconAnchor: [7, 7]
     });
@@ -476,7 +518,7 @@ function renderList() {
     const card = document.createElement('div');
     card.className = 'place-card';
     card.innerHTML =
-      '<span class="dot" style="background:' + colorForPlace(p.category, p.priority) + '"></span>' +
+      '<span class="dot" style="background:' + getColor(p.category, p.priority) + '"></span>' +
       '<div class="place-info">' +
         '<p class="name">' + p.name + '</p>' +
         '<p class="meta">' + p.region + (p.category ? ' · ' + p.category : '') + '</p>' +
@@ -486,20 +528,20 @@ function renderList() {
     const priorityControl = document.createElement('div');
     priorityControl.className = 'priority-control';
     priorityControl.innerHTML =
-      '<span class="priority-value" style="color:' + colorForPlace(p.category, p.priority) + '">' + p.priority + '</span>';
+      '<span class="priority-value" style="color:' + getColor(p.category, p.priority) + '">' + p.priority + '</span>';
     const slider = document.createElement('input');
     slider.type = 'range';
     slider.min = PRIORITY_MIN;
     slider.max = PRIORITY_MAX;
     slider.value = p.priority;
     slider.className = 'priority-slider';
-    slider.style.accentColor = colorForPlace(p.category, p.priority);
+    slider.style.accentColor = getColor(p.category, p.priority);
     slider.addEventListener('click', function (e) { e.stopPropagation(); });
     slider.addEventListener('input', function (e) {
       const newVal = parseInt(e.target.value, 10);
       priorityControl.querySelector('.priority-value').textContent = newVal;
-      priorityControl.querySelector('.priority-value').style.color = colorForPlace(p.category, newVal);
-      slider.style.accentColor = colorForPlace(p.category, newVal);
+      priorityControl.querySelector('.priority-value').style.color = getColor(p.category, newVal);
+      slider.style.accentColor = getColor(p.category, newVal);
     });
     slider.addEventListener('change', function (e) {
       updatePriority(p, parseInt(e.target.value, 10));
