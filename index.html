@@ -379,16 +379,46 @@ function buildRegionFilter() {
 // Faste, distinkte farger til kategorier (ikke oransje, siden det er reservert til prioritet)
 const CATEGORY_PALETTE = ['#2B4570', '#3F7A5C', '#7A4E9C', '#1F8A8A', '#B0392C', '#5B6472', '#B08D1C', '#4C6B8A', '#8A4B6B', '#6B7F3B'];
 let categoryColorMap = {};
+let categoryHueMap = {};
 
 function categoryColorFor(category) {
   return categoryColorMap[category] || '#9a9488';
 }
 
+function hexToHue(hex) {
+  hex = hex.replace('#', '');
+  const r = parseInt(hex.substring(0, 2), 16) / 255;
+  const g = parseInt(hex.substring(2, 4), 16) / 255;
+  const b = parseInt(hex.substring(4, 6), 16) / 255;
+  const max = Math.max(r, g, b), min = Math.min(r, g, b);
+  let h = 0;
+  if (max !== min) {
+    const d = max - min;
+    if (max === r) h = ((g - b) / d + (g < b ? 6 : 0));
+    else if (max === g) h = ((b - r) / d + 2);
+    else h = ((r - g) / d + 4);
+    h *= 60;
+  }
+  return h;
+}
+
+// Kategoriens fargetone + prioritetens styrke (blek ved lav, sterk/mørk ved høy)
+function colorForPlace(category, priority) {
+  const hue = categoryHueMap[category] !== undefined ? categoryHueMap[category] : 220;
+  const t = Math.min(Math.max((priority - PRIORITY_MIN) / (PRIORITY_MAX - PRIORITY_MIN), 0), 1);
+  const saturation = 22 + t * 58;  // 22% (blek) -> 80% (mettet)
+  const lightness = 90 - t * 55;   // 90% (lys)  -> 35% (sterk/mørk)
+  return 'hsl(' + hue + ', ' + saturation + '%, ' + lightness + '%)';
+}
+
 function buildCategoryFilter() {
   const uniqueCategories = Array.from(new Set(allPlaces.map(function (p) { return p.category; }).filter(Boolean))).sort();
   categoryColorMap = {};
+  categoryHueMap = {};
   uniqueCategories.forEach(function (c, i) {
-    categoryColorMap[c] = CATEGORY_PALETTE[i % CATEGORY_PALETTE.length];
+    const baseColor = CATEGORY_PALETTE[i % CATEGORY_PALETTE.length];
+    categoryColorMap[c] = baseColor;
+    categoryHueMap[c] = hexToHue(baseColor);
   });
 
   const categories = ['Alle'].concat(uniqueCategories);
@@ -424,7 +454,7 @@ function renderMarkers() {
   getFilteredPlaces().forEach(function (p) {
     const icon = L.divIcon({
       className: '',
-      html: '<div class="marker-pin" style="background:' + categoryColorFor(p.category) + '"></div>',
+      html: '<div class="marker-pin" style="background:' + colorForPlace(p.category, p.priority) + '"></div>',
       iconSize: [13, 13],
       iconAnchor: [7, 7]
     });
@@ -446,7 +476,7 @@ function renderList() {
     const card = document.createElement('div');
     card.className = 'place-card';
     card.innerHTML =
-      '<span class="dot" style="background:' + categoryColorFor(p.category) + '"></span>' +
+      '<span class="dot" style="background:' + colorForPlace(p.category, p.priority) + '"></span>' +
       '<div class="place-info">' +
         '<p class="name">' + p.name + '</p>' +
         '<p class="meta">' + p.region + (p.category ? ' · ' + p.category : '') + '</p>' +
@@ -456,17 +486,20 @@ function renderList() {
     const priorityControl = document.createElement('div');
     priorityControl.className = 'priority-control';
     priorityControl.innerHTML =
-      '<span class="priority-value" style="color:' + categoryColorFor(p.category) + '">' + p.priority + '</span>';
+      '<span class="priority-value" style="color:' + colorForPlace(p.category, p.priority) + '">' + p.priority + '</span>';
     const slider = document.createElement('input');
     slider.type = 'range';
     slider.min = PRIORITY_MIN;
     slider.max = PRIORITY_MAX;
     slider.value = p.priority;
     slider.className = 'priority-slider';
-    slider.style.accentColor = categoryColorFor(p.category);
+    slider.style.accentColor = colorForPlace(p.category, p.priority);
     slider.addEventListener('click', function (e) { e.stopPropagation(); });
     slider.addEventListener('input', function (e) {
-      priorityControl.querySelector('.priority-value').textContent = e.target.value;
+      const newVal = parseInt(e.target.value, 10);
+      priorityControl.querySelector('.priority-value').textContent = newVal;
+      priorityControl.querySelector('.priority-value').style.color = colorForPlace(p.category, newVal);
+      slider.style.accentColor = colorForPlace(p.category, newVal);
     });
     slider.addEventListener('change', function (e) {
       updatePriority(p, parseInt(e.target.value, 10));
